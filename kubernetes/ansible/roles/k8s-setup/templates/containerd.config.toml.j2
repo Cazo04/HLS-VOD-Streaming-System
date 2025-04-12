@@ -1,0 +1,8 @@
+{% raw %}
+{{ lookup('file', '/tmp/config.toml') }}
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+  SystemdCgroup = true
+
+[plugins."io.containerd.grpc.v1.cri".registry]
+  config_path = "/etc/containerd/certs.d"
+{% endraw %}
