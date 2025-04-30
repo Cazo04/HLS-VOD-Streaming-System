@@ -3,7 +3,18 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest --runInBand --detectOpenHandles",
+    "coverage": "jest --coverage"
+  },
+  "jest": {
+    "testEnvironment": "node",
+    "verbose": true,
+    "moduleNameMapper": {
+      "\\.(jpg|png|vtt)$": "<rootDir>/__mocks__/fileMock.js"
+    },
+    "setupFilesAfterEnv": [
+      "<rootDir>/tests/jest.setup.js"
+    ]
   },
   "keywords": [],
   "author": "",
@@ -16,5 +27,12 @@
     "fs": "^0.0.1-security",
     "mysql2": "^3.12.0",
     "path": "^0.12.7"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "mock-fs": "^5.5.0",
+    "nock": "^14.0.4",
+    "sinon": "^20.0.0",
+    "supertest": "^7.1.0"
   }
 }
