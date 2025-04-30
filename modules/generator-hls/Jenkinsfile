@@ -1,0 +1,80 @@
+pipeline {
+  agent any
+
+  environment {
+    REGISTRY      = "192.168.5.10"
+    IMAGE_NAME    = "${REGISTRY}/devops/generator-hls"
+    IMAGE_TAG     = "${env.GIT_COMMIT.take(7)}"      // tag = 7 ký tự đầu SHA
+    DOCKER_CREDS  = credentials('registry-creds')    // user/password dạng SecretText
+    TF_VAR_image_tag = IMAGE_TAG                     // export cho Terraform
+  }
+
+  stages {
+
+    stage('Checkout') {
+      steps { checkout scm }
+    }
+
+    stage('Install Node deps & Unit Test') {
+      steps {
+        sh 'corepack enable && npm install --frozen-lockfile'
+        sh 'npm test'
+      }
+    }
+
+    stage('Build Docker image') {
+      steps {
+        sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+      }
+    }
+
+    stage('Test inside Docker') {
+      steps {
+        sh """
+          docker run --rm -d --name test_container -p 3000:3000 ${IMAGE_NAME}:${IMAGE_TAG}
+          sleep 10
+          docker exec test_container npm test
+          docker stop test_container
+        """
+      }
+    }
+
+    stage('Push if not exists') {
+      steps {
+        script {
+          def status = sh(
+            returnStatus: true,
+            script: """
+              curl -s -o /dev/null -w '%{http_code}' \
+                -u "${DOCKER_CREDS_USR}:${DOCKER_CREDS_PSW}" \
+                -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+                https://${REGISTRY}/v2/devops/generator-hls/manifests/${IMAGE_TAG}
+            """
+          )
+          if (status != 200) {
+            sh "echo ${DOCKER_CREDS_PSW} | docker login ${REGISTRY} -u ${DOCKER_CREDS_USR} --password-stdin"
+            sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+          } else {
+            echo "Image đã có trên registry, bỏ qua bước push."
+          }
+        }
+      }
+    }
+
+    stage('Terraform Deploy') {
+      steps {
+        dir('terraform') {
+          withCredentials([file(credentialsId: 'kubeconfig-prod', variable: 'KUBECONFIG')]) {
+            sh """
+              terraform init -input=false
+              terraform apply -auto-approve \
+                -var="image_tag=${IMAGE_TAG}"
+            """
+          }
+        }
+      }
+    }
+  }
+
+  post { always { junit 'reports/**/*.xml' } }
+}
