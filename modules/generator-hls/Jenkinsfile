@@ -82,10 +82,13 @@
 pipeline {
     agent any
 
-    tools { nodejs 'node22' }
+    parameters {
+        string(name: 'MODULE_DIR', defaultValue: 'modules/generator-hls',
+               description: 'Relative path tới module cần build & test')
+    }
 
     environment {
-        IMAGE_NAME = "cazo04/generator-hls:dev"
+        IMAGE_NAME = "cazo04/generator-hls:${env.BUILD_NUMBER}"
     }
 
     stages {
@@ -95,9 +98,10 @@ pipeline {
             }
         }
 
-        stage('Install dependencies & Test') {
+        stage('Install & Test') {
             steps {
-                dir('modules/generator-hls') {
+                // Chỉ “đi” vào đúng thư mục module
+                dir("${params.MODULE_DIR}") {
                     sh '''
                         npm ci
                         npm test
@@ -108,21 +112,9 @@ pipeline {
 
         stage('Build Docker image') {
             steps {
-                sh '''
-                    docker build -t $IMAGE_NAME \
-                      -f modules/generator-hls/Dockerfile .
-                '''
-            }
-        }
-
-        stage('Push (tuỳ chọn)') {
-            when { expression { env.DOCKERHUB_USER } }
-            steps {
-                withCredentials([string(credentialsId: 'dockerhub-token', variable: 'TOKEN')]) {
-                    sh '''
-                        echo $TOKEN | docker login -u $DOCKERHUB_USER --password-stdin
-                        docker push $IMAGE_NAME
-                    '''
+                // Build ngay trong module (context = .)
+                dir("${params.MODULE_DIR}") {
+                    sh "docker build -t ${IMAGE_NAME} ."
                 }
             }
         }
