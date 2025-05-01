@@ -90,7 +90,11 @@ pipeline {
     }
 
     environment {
-        IMAGE_NAME = "cazo04/generator-hls:${env.BUILD_NUMBER}"
+        REGISTRY      = "192.168.5.10"
+        IMAGE_NAME    = "${REGISTRY}/devops/generator-hls"
+        IMAGE_TAG     = "${env.GIT_COMMIT.take(7)}"      
+        DOCKER_CREDS  = credentials('registry-creds')
+        DOCKER_BUILDKIT = '1'
     }
 
     stages {
@@ -114,10 +118,43 @@ pipeline {
         stage('Build Docker image') {
             steps {
                 dir("${params.MODULE_DIR}") {
-                    sh "docker build -t ${IMAGE_NAME} ."
+                    sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
                 }
             }
         }
+
+        stage('Test inside Docker') {
+            steps {
+                sh """
+                    docker run --rm \
+                        -e NODE_ENV=test \
+                        ${IMAGE_NAME}:${IMAGE_TAG} \
+                        npm test
+                """
+            }
+        }
+
+    stage('Push if not exists') {
+      steps {
+        script {
+          def status = sh(
+            returnStatus: true,
+            script: """
+              curl -s -o /dev/null -w '%{http_code}' \
+                -u "${DOCKER_CREDS_USR}:${DOCKER_CREDS_PSW}" \
+                -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
+                https://${REGISTRY}/v2/devops/generator-hls/manifests/${IMAGE_TAG}
+            """
+          )
+          if (status != 200) {
+            sh "echo ${DOCKER_CREDS_PSW} | docker login ${REGISTRY} -u ${DOCKER_CREDS_USR} --password-stdin"
+            sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+          } else {
+            echo "Image đã có trên registry, bỏ qua bước push."
+          }
+        }
+      }
+    }
     }
 
     post {
