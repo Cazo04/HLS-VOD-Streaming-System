@@ -155,6 +155,39 @@ pipeline {
         }
       }
     }
+
+    stage('Terraform Deploy to K8s') {
+    steps {
+        dir("${params.MODULE_DIR}/terraform") {
+
+            withCredentials([file(credentialsId: 'kubeconfig-prod',
+                                  variable: 'KCFG')]) {
+                withEnv(["KUBECONFIG=${KCFG}"]) {
+
+                    sh '''
+                      echo "Terraform init"
+                      terraform init -input=false
+
+                      echo "Terraform apply"
+                      terraform apply -auto-approve \
+                        -var="kubeconfig_path=${KUBECONFIG}" \
+                        -var="image_tag=${IMAGE_TAG}" \
+                        -var="image_repository=${IMAGE_NAME}"
+
+                      echo "Outputs:"
+                      terraform output
+
+                      echo "Domain     : $(terraform output -raw domain)"
+                      echo "Cluster IP : $(terraform output -raw cluster_ip)"
+                      echo "Image      : $(terraform output -raw image_deployed)"
+                    '''
+                }
+            }
+        }
+    }
+}
+
+
     }
 
     post {
