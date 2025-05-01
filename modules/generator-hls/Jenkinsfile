@@ -3,20 +3,24 @@ pipeline {
 
     tools { 
       nodejs 'node22'
-      terraform 'terraform50319' 
+      terraform 'terraform50319'
     }
 
     parameters {
         string(name: 'MODULE_DIR', defaultValue: 'modules/generator-hls',
-               description: 'Relative path tới module cần build & test')
+            description: 'Relative path tới module cần build & test')
+        booleanParam(name: 'DESTROY', defaultValue: false, description: 'Tick để chạy destroy')
+        booleanParam(name: 'DELETE_IMAGE', defaultValue: false, description: 'Tick để xóa Docker image')
+        string(name: 'DELETE_IMAGE_TAG', defaultValue: '', description: 'Tag của image cần xóa (để trống sẽ dùng IMAGE_TAG hiện tại)')
     }
 
     environment {
-        REGISTRY      = "192.168.5.10"
-        IMAGE_NAME    = "${REGISTRY}/devops/generator-hls"
-        IMAGE_TAG     = "${env.GIT_COMMIT.take(7)}"      
-        DOCKER_CREDS  = credentials('registry-creds')
+        REGISTRY = "192.168.5.10"
+        IMAGE_NAME = "${REGISTRY}/devops/generator-hls"
+        IMAGE_TAG = "${env.GIT_COMMIT.take(7)}"
+        DOCKER_CREDS = credentials('registry-creds')
         DOCKER_BUILDKIT = '1'
+        IS_CICD_CHANGE = false
     }
 
     stages {
@@ -25,8 +29,123 @@ pipeline {
                 checkout scm
             }
         }
+        
+        stage('Setup Delete Image Tag') {
+            when {
+                expression { return params.DELETE_IMAGE }
+            }
+            steps {
+                script {
+                    if (params.DELETE_IMAGE_TAG?.trim()) {
+                        env.IMAGE_TAG_TO_DELETE = params.DELETE_IMAGE_TAG.trim()
+                        echo "Will delete image with tag: ${env.IMAGE_TAG_TO_DELETE}"
+                    } else {
+                        env.IMAGE_TAG_TO_DELETE = env.IMAGE_TAG
+                        echo "No specific tag provided, will delete current image tag: ${env.IMAGE_TAG_TO_DELETE}"
+                    }
+                }
+            }
+        }
+
+        stage('Delete Docker Image') {
+            when {
+                expression { return params.DELETE_IMAGE }
+            }
+            steps {
+                script {
+                    echo "Deleting Docker image ${IMAGE_NAME}:${env.IMAGE_TAG_TO_DELETE}"
+                    
+                    // Delete from local Docker
+                    sh(script: "docker rmi ${IMAGE_NAME}:${env.IMAGE_TAG_TO_DELETE} || echo 'Image not found locally'", returnStatus: true)
+                    
+                    // Delete from Harbor registry
+                    sh """
+                        echo ${DOCKER_CREDS_PSW} | docker login ${REGISTRY} -u ${DOCKER_CREDS_USR} --password-stdin
+                        
+                        # Delete from registry using API
+                        curl -s -X DELETE \\
+                            -u "${DOCKER_CREDS_USR}:${DOCKER_CREDS_PSW}" \\
+                            https://${REGISTRY}/v2/devops/generator-hls/manifests/\\
+                            \$(curl -s -I \\
+                                -u "${DOCKER_CREDS_USR}:${DOCKER_CREDS_PSW}" \\
+                                -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \\
+                                https://${REGISTRY}/v2/devops/generator-hls/manifests/${env.IMAGE_TAG_TO_DELETE} \\
+                                | grep Docker-Content-Digest \\
+                                | awk '{print \$2}' \\
+                                | tr -d '\r') || echo "Failed to delete from registry"
+                    """
+                    
+                    echo "Docker image deleted successfully (if it existed)"
+                }
+            }
+        }
+
+        stage('Check for CI/CD Changes') {
+            when {
+                allOf {
+                    expression { return params.DESTROY == false }
+                    expression { return params.DELETE_IMAGE == false }
+                }
+            }
+            steps {
+                script {
+                    // Get changed files list
+                    def changeSet = sh(script: 'git diff --name-only HEAD~1 HEAD || echo "error"', returnStdout: true).trim()
+                    echo "Changed files: ${changeSet}"
+                    
+                    // If error occurred or couldn't get changes, don't skip any steps
+                    if (changeSet == "error") {
+                        env.IS_CICD_CHANGE = "false"
+                        echo "Could not determine changed files, will run full pipeline"
+                        return
+                    }
+                    
+                    // Check if changes are only in CI/CD files
+                    def nonCiCdChanges = sh(
+                        script: """
+                            git diff --name-only HEAD~1 HEAD | grep -v -E '(Jenkinsfile|terraform/.*\\.tf)'
+                        """,
+                        returnStatus: true
+                    )
+                    
+                    // If grep found non-CI/CD files, nonCiCdChanges will be 0 (success)
+                    // If grep didn't find any non-CI/CD files (only CI/CD files changed), nonCiCdChanges will be 1 (not found)
+                    env.IS_CICD_CHANGE = (nonCiCdChanges == 1).toString()
+                    
+                    echo "CI/CD changes only: ${env.IS_CICD_CHANGE}"
+                    
+                    if (env.IS_CICD_CHANGE == "true") {
+                        echo "Only CI/CD files changed - skipping test and build stages"
+                        
+                        // Get the latest successful image tag for Terraform
+                        def latestImageTag = sh(
+                            script: """
+                                curl -s -u "${DOCKER_CREDS_USR}:${DOCKER_CREDS_PSW}" \\
+                                https://${REGISTRY}/v2/devops/generator-hls/tags/list | \\
+                                jq -r '.tags | sort | reverse | .[0]' || echo "latest"
+                            """,
+                            returnStdout: true
+                        ).trim()
+                        
+                        if (latestImageTag) {
+                            env.IMAGE_TAG = latestImageTag
+                            echo "Using latest image tag: ${env.IMAGE_TAG}"
+                        } else {
+                            echo "Could not determine latest image tag, will use: ${env.IMAGE_TAG}"
+                        }
+                    }
+                }
+            }
+        }
 
         stage('Install & Test') {
+            when {
+                allOf {
+                    expression { return env.IS_CICD_CHANGE == "false" }
+                    expression { return params.DESTROY == false }
+                    expression { return params.DELETE_IMAGE == false }
+                }
+            }
             steps {
                 dir("${params.MODULE_DIR}") {
                     sh '''
@@ -38,6 +157,13 @@ pipeline {
         }
 
         stage('Build Docker image') {
+            when {
+                allOf {
+                    expression { return env.IS_CICD_CHANGE == "false" }
+                    expression { return params.DESTROY == false }
+                    expression { return params.DELETE_IMAGE == false }
+                }
+            }
             steps {
                 dir("${params.MODULE_DIR}") {
                     sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
@@ -46,76 +172,116 @@ pipeline {
         }
 
         stage('Test inside Docker') {
+            when {
+                allOf {
+                    expression { return env.IS_CICD_CHANGE == "false" }
+                    expression { return params.DESTROY == false }
+                    expression { return params.DELETE_IMAGE == false }
+                }
+            }
             steps {
                 sh """
-                    docker run --rm \
-                        -e NODE_ENV=test \
-                        ${IMAGE_NAME}:${IMAGE_TAG} \
-                        npm test
+                    docker run --rm \\
+                    -e NODE_ENV=test \\
+                    ${IMAGE_NAME}:${IMAGE_TAG} \\
+                    npm test
                 """
             }
         }
 
-    stage('Push if not exists') {
-      steps {
-        script {
-          def status = sh(
-            returnStatus: true,
-            script: """
-              curl -s -o /dev/null -w '%{http_code}' \
-                -u "${DOCKER_CREDS_USR}:${DOCKER_CREDS_PSW}" \
-                -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \
-                https://${REGISTRY}/v2/devops/generator-hls/manifests/${IMAGE_TAG}
-            """
-          )
-          if (status != 200) {
-            sh "echo ${DOCKER_CREDS_PSW} | docker login ${REGISTRY} -u ${DOCKER_CREDS_USR} --password-stdin"
-            sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
-          } else {
-            echo "Image đã có trên registry, bỏ qua bước push."
-          }
-        }
-      }
-    }
+        stage('Push if not exists') {
+            when {
+                allOf {
+                    expression { return env.IS_CICD_CHANGE == "false" }
+                    expression { return params.DESTROY == false }
+                    expression { return params.DELETE_IMAGE == false }
+                }
+            }
+            steps {
+                script {
+                    def status = sh(
+                        returnStatus: true,
+                        script: """
+                            curl -s -o /dev/null -w '%{http_code}' \\
+                            -u "${DOCKER_CREDS_USR}:${DOCKER_CREDS_PSW}" \\
+                            -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \\
+                            https://${REGISTRY}/v2/devops/generator-hls/manifests/${IMAGE_TAG}
+                        """
+                    )
+                    if (status != 200) {
+                        sh "echo ${DOCKER_CREDS_PSW} | docker login ${REGISTRY} -u ${DOCKER_CREDS_USR} --password-stdin"
+                        sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+                    } else {
+                        echo "Image đã có trên registry, bỏ qua bước push."
+                    }
+                }
+            }
+        }       
 
-    stage('Terraform Deploy to K8s') {
-    steps {
-        dir("${params.MODULE_DIR}/terraform") {
+        stage('Terraform Deploy to K8s') {
+            when {
+                expression { return params.DESTROY == false }
+                expression { return params.DELETE_IMAGE == false }
+            }
+            steps {
+                dir("${params.MODULE_DIR}/terraform") {
+                    withCredentials([file(credentialsId: 'kubeconfig-prod',
+                        variable: 'KCFG')]) {
+                        withEnv(["KUBECONFIG=${KCFG}"]) {
+                            sh '''
+                                echo "Terraform init"
+                                terraform init -input=false
 
-            withCredentials([file(credentialsId: 'kubeconfig-prod',
-                                  variable: 'KCFG')]) {
-                withEnv(["KUBECONFIG=${KCFG}"]) {
+                                echo "Terraform apply"
+                                terraform apply -auto-approve \\
+                                    -var="kubeconfig_path=${KUBECONFIG}" \\
+                                    -var="image_tag=${IMAGE_TAG}" \\
+                                    -var="image_repository=${IMAGE_NAME}"
 
-                    sh '''
-                      echo "Terraform init"
-                      terraform init -input=false
+                                echo "Outputs:"
+                                terraform output
 
-                      echo "Terraform apply"
-                      terraform apply -auto-approve \
-                        -var="kubeconfig_path=${KUBECONFIG}" \
-                        -var="image_tag=${IMAGE_TAG}" \
-                        -var="image_repository=${IMAGE_NAME}"
-
-                      echo "Outputs:"
-                      terraform output
-
-                      echo "Domain     : $(terraform output -raw domain)"
-                      echo "Cluster IP : $(terraform output -raw cluster_ip)"
-                      echo "Image      : $(terraform output -raw image_deployed)"
-                    '''
+                                echo "Domain     : $(terraform output -raw domain)"
+                                echo "Cluster IP : $(terraform output -raw cluster_ip)"
+                                echo "Image      : $(terraform output -raw image_deployed)"
+                            '''
+                        }
+                    }
                 }
             }
         }
-    }
-}
 
-
+        stage('Terraform Destroy') {
+            when {
+                expression { return params.DESTROY == true }
+                expression { return params.DELETE_IMAGE == false }
+            }
+            steps {
+                dir("${params.MODULE_DIR}/terraform") {
+                    withCredentials([file(credentialsId: 'kubeconfig-prod',
+                        variable: 'KCFG')]) {
+                        withEnv(["KUBECONFIG=${KCFG}"]) {
+                            sh '''
+                                echo "Terraform init"
+                                terraform init -input=false
+                                
+                                echo "Terraform destroy"
+                                terraform destroy -auto-approve \\
+                                    -var="kubeconfig_path=${KUBECONFIG}" \\
+                                    -var="image_tag=${IMAGE_TAG}" \\
+                                    -var="image_repository=${IMAGE_NAME}"
+                            '''
+                        }
+                    }
+                }
+            }
+        }
     }
 
     post {
         always {
             archiveArtifacts artifacts: 'modules/generator-hls/test-results/**/*', allowEmptyArchive: true
-            junit '**/modules/generator-hls/test-results/**/*.xml' 
+            junit '**/modules/generator-hls/test-results/**/*.xml'
         }
         success {
             echo "✅ Pipeline finished OK"
