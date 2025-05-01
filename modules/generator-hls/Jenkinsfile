@@ -115,7 +115,7 @@ pipeline {
                     }
                     
                     // If no module code changed, this is a CI/CD-only change
-                    env.IS_CICD_CHANGE = (!moduleCodeChanged)
+                    env.IS_CICD_CHANGE = !moduleCodeChanged
                     
                     echo "CI/CD changes only: ${env.IS_CICD_CHANGE}"
                     
@@ -137,6 +137,7 @@ pipeline {
                             echo "Using latest image tag: ${env.IMAGE_TAG}"
                         } else {
                             echo "Could not determine latest image tag, will use: ${env.IMAGE_TAG}"
+                            env.IS_CICD_CHANGE = false
                         }
                     }
                 }
@@ -146,7 +147,7 @@ pipeline {
         stage('Install & Test') {
             when {
                 allOf {
-                    expression { return env.IS_CICD_CHANGE == "false" }
+                    expression { return env.IS_CICD_CHANGE == false }
                     expression { return params.DESTROY == false }
                     expression { return params.DELETE_IMAGE == false }
                 }
@@ -164,7 +165,7 @@ pipeline {
         stage('Build Docker image') {
             when {
                 allOf {
-                    expression { return env.IS_CICD_CHANGE == "false" }
+                    expression { return env.IS_CICD_CHANGE == false }
                     expression { return params.DESTROY == false }
                     expression { return params.DELETE_IMAGE == false }
                 }
@@ -191,7 +192,7 @@ pipeline {
         stage('Test inside Docker') {
             when {
                 allOf {
-                    expression { return env.IS_CICD_CHANGE == "false" }
+                    expression { return env.IS_CICD_CHANGE == false }
                     expression { return params.DESTROY == false }
                     expression { return params.DELETE_IMAGE == false }
                 }
@@ -209,7 +210,7 @@ pipeline {
         stage('Push if not exists') {
             when {
                 allOf {
-                    expression { return env.IS_CICD_CHANGE == "false" }
+                    expression { return env.IS_CICD_CHANGE == false }
                     expression { return params.DESTROY == false }
                     expression { return params.DELETE_IMAGE == false }
                 }
@@ -271,7 +272,7 @@ pipeline {
         stage('Cleanup local image') {
             when { 
                 expression { params.CLEANUP == true } 
-                expression { return env.IS_CICD_CHANGE == "false" }
+                expression { return env.IS_CICD_CHANGE == false }
                 expression { return params.DESTROY == false }
             } 
             steps {
