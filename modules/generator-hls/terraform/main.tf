@@ -11,16 +11,10 @@ provider "kubernetes" {
   config_path = var.kubeconfig_path
 }
 
-resource "kubernetes_namespace" "ns" {
-  metadata {
-    name = var.namespace
-  }
-}
-
 resource "kubernetes_deployment" "generate_hls" {
   metadata {
     name      = var.deployment_name
-    namespace = kubernetes_namespace.ns.metadata[0].name
+    namespace = var.namespace
     labels = {
       app = var.app_label
     }
@@ -93,7 +87,7 @@ resource "kubernetes_deployment" "generate_hls" {
 resource "kubernetes_service" "generate_hls" {
   metadata {
     name      = "${var.app_label}-svc"
-    namespace = kubernetes_namespace.ns.metadata[0].name
+    namespace = var.namespace
     labels = {
       app = var.app_label
     }
