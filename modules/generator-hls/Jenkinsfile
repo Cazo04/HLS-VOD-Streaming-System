@@ -166,7 +166,19 @@ pipeline {
             }
             steps {
                 dir("${params.MODULE_DIR}") {
-                    sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+                    script {
+                        def imageExists = sh(
+                            script: "docker image inspect ${IMAGE_NAME}:${IMAGE_TAG} >/dev/null 2>&1",
+                            returnStatus: true
+                        ) == 0
+                        
+                        if (imageExists) {
+                            echo "Image ${IMAGE_NAME}:${IMAGE_TAG} already exists locally, skipping build"
+                        } else {
+                            echo "Building image ${IMAGE_NAME}:${IMAGE_TAG}"
+                            sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+                        }
+                    }
                 }
             }
         }
@@ -199,20 +211,20 @@ pipeline {
             }
             steps {
                 script {
-                    def status = sh(
+                    // First login to registry
+                    sh "echo ${DOCKER_CREDS_PSW} | docker login ${REGISTRY} -u ${DOCKER_CREDS_USR} --password-stdin"
+                    
+                    // Check if the image already exists in the registry
+                    def imageExists = sh(
                         returnStatus: true,
-                        script: """
-                            curl -s -o /dev/null -w '%{http_code}' \\
-                            -u "${DOCKER_CREDS_USR}:${DOCKER_CREDS_PSW}" \\
-                            -H 'Accept: application/vnd.docker.distribution.manifest.v2+json' \\
-                            https://${REGISTRY}/v2/devops/generator-hls/manifests/${IMAGE_TAG}
-                        """
-                    )
-                    if (status != 200) {
-                        sh "echo ${DOCKER_CREDS_PSW} | docker login ${REGISTRY} -u ${DOCKER_CREDS_USR} --password-stdin"
-                        sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+                        script: "docker manifest inspect ${IMAGE_NAME}:${IMAGE_TAG} > /dev/null"
+                    ) == 0
+                    
+                    if (imageExists) {
+                        echo "Image already exists in registry, skipping push."
                     } else {
-                        echo "Image đã có trên registry, bỏ qua bước push."
+                        echo "Pushing image ${IMAGE_NAME}:${IMAGE_TAG} to registry"
+                        sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
                     }
                 }
             }
@@ -280,6 +292,7 @@ pipeline {
 
     post {
         always {
+            sh 'docker system prune -af --filter "until=12h"'
             archiveArtifacts artifacts: 'modules/generator-hls/test-results/**/*', allowEmptyArchive: true
             junit '**/modules/generator-hls/test-results/**/*.xml'
         }
