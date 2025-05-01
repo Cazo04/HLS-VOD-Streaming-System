@@ -96,7 +96,7 @@ pipeline {
                     
                     // If error occurred or couldn't get changes, don't skip any steps
                     if (changeSet == "error") {
-                        env.IS_CICD_CHANGE = "false"
+                        env.IS_CICD_CHANGE = false
                         echo "Could not determine changed files, will run full pipeline"
                         return
                     }
@@ -109,20 +109,17 @@ pipeline {
                     for (String file : changedFiles) {
                         if (!file.startsWith(params.MODULE_DIR + "/terraform") &&
                                 !file.startsWith(params.MODULE_DIR + "/Jenkinsfile")) {
-                                    echo "Module code changed: ${file}"
                                     moduleCodeChanged = true
                                     break
                         }
                     }
-
-                    echo "Module code changed: ${(!moduleCodeChanged).toString()}"
                     
                     // If no module code changed, this is a CI/CD-only change
-                    env.IS_CICD_CHANGE = (!moduleCodeChanged).toString()
+                    env.IS_CICD_CHANGE = (!moduleCodeChanged)
                     
                     echo "CI/CD changes only: ${env.IS_CICD_CHANGE}"
                     
-                    if (env.IS_CICD_CHANGE == "true") {
+                    if (env.IS_CICD_CHANGE == true) {
                         echo "Only CI/CD files changed - skipping test and build stages"
                         
                         // Get the latest successful image tag for Terraform
