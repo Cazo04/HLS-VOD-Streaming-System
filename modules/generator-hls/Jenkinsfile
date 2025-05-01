@@ -104,7 +104,7 @@ pipeline {
                     // Check if there are CI/CD file changes
                     def cicdChanges = sh(
                         script: """
-                            git diff --name-only HEAD~1 HEAD | grep -E '(${params.MODULE_DIR}/Jenkinsfile|${params.MODULE_DIR}/terraform/.*\\.tf)'
+                            echo '${changeSet}' | grep -E '(${params.MODULE_DIR}/Jenkinsfile|${params.MODULE_DIR}/terraform/.*\\.tf)' || echo ""
                         """,
                         returnStdout: true
                     ).trim()
