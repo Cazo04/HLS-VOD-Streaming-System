@@ -100,17 +100,17 @@ pipeline {
                         return
                     }
                     
-                    // Check if changes are only in CI/CD files
-                    def nonCiCdChanges = sh(
+                    // Check if there are CI/CD file changes
+                    def cicdChanges = sh(
                         script: """
-                            git diff --name-only HEAD~1 HEAD | grep -E '(Jenkinsfile|terraform/.*\\.tf)'
+                            git diff --name-only HEAD~1 HEAD | grep -E '(${params.MODULE_DIR}/Jenkinsfile|${params.MODULE_DIR}/terraform/.*\\.tf)'
                         """,
-                        returnStatus: true
-                    )
+                        returnStdout: true
+                    ).trim()
                     
-                    // If grep found non-CI/CD files, nonCiCdChanges will be 0 (success)
-                    // If grep didn't find any non-CI/CD files (only CI/CD files changed), nonCiCdChanges will be 1 (not found)
-                    env.IS_CICD_CHANGE = (nonCiCdChanges == 1).toString()
+                    // If cicdChanges is empty, there are no CI/CD changes
+                    // If it has content, CI/CD files have changed
+                    env.IS_CICD_CHANGE = (!cicdChanges.isEmpty()).toString()
                     
                     echo "CI/CD changes only: ${env.IS_CICD_CHANGE}"
                     
