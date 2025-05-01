@@ -115,7 +115,7 @@ pipeline {
                         }
                     }
 
-                    echo "Module code changed: ${moduleCodeChanged}"
+                    echo "Module code changed: ${!moduleCodeChanged.toString()}"
                     
                     // If no module code changed, this is a CI/CD-only change
                     env.IS_CICD_CHANGE = (!moduleCodeChanged).toString()
