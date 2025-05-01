@@ -103,7 +103,7 @@ pipeline {
                     // Check if changes are only in CI/CD files
                     def nonCiCdChanges = sh(
                         script: """
-                            git diff --name-only HEAD~1 HEAD | grep -v -E '(Jenkinsfile|terraform/.*\\.tf)'
+                            git diff --name-only HEAD~1 HEAD | grep -E '(Jenkinsfile|terraform/.*\\.tf)'
                         """,
                         returnStatus: true
                     )
