@@ -107,14 +107,10 @@ pipeline {
                     // Determine if any application code changed in the module
                     boolean moduleCodeChanged = false
                     for (String file : changedFiles) {
-                        if (file.startsWith(params.MODULE_DIR)) {
-                            echo "File changed: ${file}"
-                            if (file.startsWith(params.MODULE_DIR + "/terraform") ||
-                                file.startsWith(params.MODULE_DIR + "/Jenkinsfile")) {
-                                    echo "Terraform or Jenkinsfile changed - skipping test and build stages"
+                        if (!file.startsWith(params.MODULE_DIR + "/terraform") &&
+                                !file.startsWith(params.MODULE_DIR + "/Jenkinsfile")) {
                                     moduleCodeChanged = true
                                     break
-                            }
                         }
                     }
                     
