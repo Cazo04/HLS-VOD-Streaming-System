@@ -6,7 +6,7 @@ variable "kubeconfig_path" {
 variable "namespace" {
   description = "Namespace để deploy."
   type        = string
-  default     = "devops"
+  default     = "default"
 }
 
 variable "deployment_name" {
