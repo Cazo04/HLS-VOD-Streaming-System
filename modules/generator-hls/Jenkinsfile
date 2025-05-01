@@ -82,6 +82,8 @@
 pipeline {
     agent any
 
+    tools { nodejs 'node22' }
+
     environment {
         IMAGE_NAME = "cazo04/generator-hls:dev"
     }
