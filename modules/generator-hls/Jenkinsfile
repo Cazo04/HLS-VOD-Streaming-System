@@ -8,10 +8,11 @@ pipeline {
 
     parameters {
         string(name: 'MODULE_DIR', defaultValue: 'modules/generator-hls',
-            description: 'Relative path tới module cần build & test')
-        booleanParam(name: 'DESTROY', defaultValue: false, description: 'Tick để chạy destroy')
-        booleanParam(name: 'DELETE_IMAGE', defaultValue: false, description: 'Tick để xóa Docker image')
-        string(name: 'DELETE_IMAGE_TAG', defaultValue: '', description: 'Tag của image cần xóa (để trống sẽ dùng IMAGE_TAG hiện tại)')
+            description: 'Relative path to module for build & test')
+        booleanParam(name: 'CLEANUP', defaultValue: true, description: 'Delete local image after push')
+        booleanParam(name: 'DESTROY', defaultValue: false, description: 'Check to run destroy')
+        booleanParam(name: 'DELETE_IMAGE', defaultValue: false, description: 'Check to delete Docker image')
+        string(name: 'DELETE_IMAGE_TAG', defaultValue: '', description: 'Tag of image to delete (leave empty to use current IMAGE_TAG)')
     }
 
     environment {
@@ -263,6 +264,19 @@ pipeline {
             }
         }
 
+        stage('Cleanup local image') {
+            when { 
+                expression { params.CLEANUP == true } 
+                expression { return env.IS_CICD_CHANGE == "false" }
+                expression { return params.DESTROY == false }
+            } 
+            steps {
+                sh """
+                    docker image rm ${IMAGE_NAME}:${IMAGE_TAG} || true
+                """
+            }
+        }
+
         stage('Terraform Destroy') {
             when {
                 expression { return params.DESTROY == true }
@@ -300,7 +314,7 @@ pipeline {
             echo "✅ Pipeline finished OK"
         }
         failure {
-            echo "❌ Có lỗi – kiểm tra Console Output!"
+            echo "❌ Error - check Console Output!"
         }
     }
 }
