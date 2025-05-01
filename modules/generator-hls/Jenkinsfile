@@ -119,7 +119,7 @@ pipeline {
                     
                     echo "CI/CD changes only: ${env.IS_CICD_CHANGE}"
                     
-                    if (env.IS_CICD_CHANGE == true) {
+                    if (!moduleCodeChanged == true) {
                         echo "Only CI/CD files changed - skipping test and build stages"
                         
                         // Get the latest successful image tag for Terraform
