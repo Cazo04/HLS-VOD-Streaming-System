@@ -100,18 +100,23 @@ pipeline {
                         echo "Could not determine changed files, will run full pipeline"
                         return
                     }
+                                
+                    // Process changed files directly from changeSet
+                    def changedFiles = changeSet.split('\n')
                     
-                    // Check if there are CI/CD file changes
-                    def cicdChanges = sh(
-                        script: """
-                            echo '${changeSet}' | grep -E '(${params.MODULE_DIR}/Jenkinsfile|${params.MODULE_DIR}/terraform/.*\\.tf)' || echo ""
-                        """,
-                        returnStdout: true
-                    ).trim()
+                    // Determine if any application code changed in the module
+                    boolean moduleCodeChanged = false
+                    for (String file : changedFiles) {
+                        if (file.startsWith(params.MODULE_DIR) && 
+                            !file.startsWith(params.MODULE_DIR + "/terraform") && 
+                            !file.endsWith("Jenkinsfile")) {
+                            moduleCodeChanged = true
+                            break
+                        }
+                    }
                     
-                    // If cicdChanges is empty, there are no CI/CD changes
-                    // If it has content, CI/CD files have changed
-                    env.IS_CICD_CHANGE = (!cicdChanges.isEmpty()).toString()
+                    // If no module code changed, this is a CI/CD-only change
+                    env.IS_CICD_CHANGE = (!moduleCodeChanged).toString()
                     
                     echo "CI/CD changes only: ${env.IS_CICD_CHANGE}"
                     
