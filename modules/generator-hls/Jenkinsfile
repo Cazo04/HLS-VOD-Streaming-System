@@ -109,8 +109,8 @@ pipeline {
                     for (String file : changedFiles) {
                         if (file.startsWith(params.MODULE_DIR)) {
                             echo "File changed: ${file}"
-                            if (file.endsWith("/terraform") ||
-                                file.endsWith("/Jenkinsfile")) {
+                            if (file.startsWith(params.MODULE_DIR + "/terraform") ||
+                                file.startsWith(params.MODULE_DIR + "/Jenkinsfile")) {
                                     moduleCodeChanged = true
                                     break
                             }
