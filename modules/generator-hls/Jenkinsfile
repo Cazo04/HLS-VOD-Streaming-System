@@ -82,7 +82,10 @@
 pipeline {
     agent any
 
-    tools { nodejs 'node22' }
+    tools { 
+      nodejs 'node22'
+      terraform 'terraform50319' 
+    }
 
     parameters {
         string(name: 'MODULE_DIR', defaultValue: 'modules/generator-hls',
