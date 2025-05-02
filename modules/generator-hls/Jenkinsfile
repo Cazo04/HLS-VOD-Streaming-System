@@ -169,6 +169,18 @@ pipeline {
             }
         }       
 
+        stage('Cleanup local image') {
+            when { 
+                expression { params.CLEANUP == true } 
+                expression { return params.DESTROY == false }
+            } 
+            steps {
+                sh """
+                    docker image rm ${IMAGE_NAME}:${IMAGE_TAG} || true
+                """
+            }
+        }
+
         stage('Terraform Deploy to K8s') {
             when {
                 expression { return params.DESTROY == false }
@@ -200,19 +212,7 @@ pipeline {
                     }
                 }
             }
-        }
-
-        stage('Cleanup local image') {
-            when { 
-                expression { params.CLEANUP == true } 
-                expression { return params.DESTROY == false }
-            } 
-            steps {
-                sh """
-                    docker image rm ${IMAGE_NAME}:${IMAGE_TAG} || true
-                """
-            }
-        }
+        }       
 
         stage('Terraform Destroy') {
             when {
