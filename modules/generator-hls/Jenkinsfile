@@ -21,7 +21,6 @@ pipeline {
         IMAGE_TAG = "${env.GIT_COMMIT.take(7)}"
         DOCKER_CREDS = credentials('registry-creds')
         DOCKER_BUILDKIT = '1'
-        IS_CICD_CHANGE = false
     }
 
     stages {
