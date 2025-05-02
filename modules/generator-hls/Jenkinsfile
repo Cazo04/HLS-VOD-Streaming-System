@@ -84,7 +84,6 @@ pipeline {
         stage('Install & Test') {
             when {
                 allOf {
-                    expression { return env.IS_CICD_CHANGE == false }
                     expression { return params.DESTROY == false }
                     expression { return params.DELETE_IMAGE == false }
                 }
@@ -102,7 +101,6 @@ pipeline {
         stage('Build Docker image') {
             when {
                 allOf {
-                    expression { return env.IS_CICD_CHANGE == false }
                     expression { return params.DESTROY == false }
                     expression { return params.DELETE_IMAGE == false }
                 }
@@ -129,7 +127,6 @@ pipeline {
         stage('Test inside Docker') {
             when {
                 allOf {
-                    expression { return env.IS_CICD_CHANGE == false }
                     expression { return params.DESTROY == false }
                     expression { return params.DELETE_IMAGE == false }
                 }
@@ -147,7 +144,6 @@ pipeline {
         stage('Push if not exists') {
             when {
                 allOf {
-                    expression { return env.IS_CICD_CHANGE == false }
                     expression { return params.DESTROY == false }
                     expression { return params.DELETE_IMAGE == false }
                 }
@@ -209,7 +205,6 @@ pipeline {
         stage('Cleanup local image') {
             when { 
                 expression { params.CLEANUP == true } 
-                expression { return env.IS_CICD_CHANGE == false }
                 expression { return params.DESTROY == false }
             } 
             steps {
