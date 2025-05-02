@@ -112,10 +112,7 @@ pipeline {
                                     moduleCodeChanged = true
                                     break
                         }
-                    }
-                    
-                    // If no module code changed, this is a CI/CD-only change
-                    env.IS_CICD_CHANGE = !moduleCodeChanged
+                    }                    
                     
                     echo "CI/CD changes only: ${env.IS_CICD_CHANGE}"
                     
@@ -135,6 +132,7 @@ pipeline {
                         if (latestImageTag) {
                             env.IMAGE_TAG = latestImageTag
                             echo "Using latest image tag: ${env.IMAGE_TAG}"
+                            env.IS_CICD_CHANGE = true
                         } else {
                             echo "Could not determine latest image tag, will use: ${env.IMAGE_TAG}"
                             env.IS_CICD_CHANGE = false
