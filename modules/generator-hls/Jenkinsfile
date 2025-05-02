@@ -81,67 +81,6 @@ pipeline {
             }
         }
 
-        stage('Check for CI/CD Changes') {
-            when {
-                allOf {
-                    expression { return params.DESTROY == false }
-                    expression { return params.DELETE_IMAGE == false }
-                }
-            }
-            steps {
-                script {
-                    // Get changed files list
-                    def changeSet = sh(script: 'git diff --name-only HEAD~1 HEAD || echo "error"', returnStdout: true).trim()
-                    echo "Changed files: ${changeSet}"
-                    
-                    // If error occurred or couldn't get changes, don't skip any steps
-                    if (changeSet == "error") {
-                        env.IS_CICD_CHANGE = false
-                        echo "Could not determine changed files, will run full pipeline"
-                        return
-                    }
-                                
-                    // Process changed files directly from changeSet
-                    def changedFiles = changeSet.split('\n')
-                    
-                    // Determine if any application code changed in the module
-                    boolean moduleCodeChanged = false
-                    for (String file : changedFiles) {
-                        if (!file.startsWith(params.MODULE_DIR + "/terraform") &&
-                                !file.startsWith(params.MODULE_DIR + "/Jenkinsfile")) {
-                                    moduleCodeChanged = true
-                                    break
-                        }
-                    }                    
-                    
-                    echo "CI/CD changes only: ${env.IS_CICD_CHANGE}"
-                    
-                    if (!moduleCodeChanged == true) {
-                        echo "Only CI/CD files changed - skipping test and build stages"
-                        
-                        // Get the latest successful image tag for Terraform
-                        def latestImageTag = sh(
-                            script: """
-                                curl -s -u "${DOCKER_CREDS_USR}:${DOCKER_CREDS_PSW}" \\
-                                https://${REGISTRY}/v2/devops/generator-hls/tags/list | \\
-                                jq -r '.tags | sort | reverse | .[0]' || echo "latest"
-                            """,
-                            returnStdout: true
-                        ).trim()
-                        
-                        if (latestImageTag) {
-                            env.IMAGE_TAG = latestImageTag
-                            echo "Using latest image tag: ${env.IMAGE_TAG}"
-                            env.IS_CICD_CHANGE = true
-                        } else {
-                            echo "Could not determine latest image tag, will use: ${env.IMAGE_TAG}"
-                            env.IS_CICD_CHANGE = false
-                        }
-                    }
-                }
-            }
-        }
-
         stage('Install & Test') {
             when {
                 allOf {
