@@ -12,7 +12,7 @@ variable "deployment_name" {
 variable "namespace" {
   description = "Namespace triển khai"
   type        = string
-  default     = "devops"
+  default     = "default"
 }
 
 variable "app_label" {
