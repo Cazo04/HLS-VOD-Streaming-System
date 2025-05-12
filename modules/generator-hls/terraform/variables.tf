@@ -45,7 +45,7 @@ variable "base_dir"        {
 }
 variable "hash_service_url"{ 
     type = string 
-    default = "http://node-hash-service-clusterip:3000/hash/" 
+    default = "http://node-devops-hash-svc/hash/" 
 }
 variable "db_host"         { 
     type = string 
