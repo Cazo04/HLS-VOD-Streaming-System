@@ -40,7 +40,7 @@ variable "image_tag" {
 variable "base_dir" {
   description = "Đường dẫn CephFS mount trong container"
   type        = string
-  default     = "/mnt/cephfs/completed"
+  default     = "/mnt/cephfs"
 }
 
 variable "db_host" {

@@ -48,7 +48,7 @@ resource "kubernetes_deployment" "hash" {
 
           env {
             name  = "BASE_DIR"
-            value = var.base_dir                              
+            value = "${var.base_dir}/completed"                              
           }
           env {
             name  = "DB_HOST"
