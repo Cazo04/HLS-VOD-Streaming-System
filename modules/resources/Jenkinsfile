@@ -1,0 +1,203 @@
+pipeline {
+    agent any
+
+    tools {
+        nodejs    'node22'         
+        terraform 'terraform50319'
+    }
+
+    parameters {
+        string(name: 'MODULE_DIR',
+               defaultValue: 'modules/resources',
+               description: 'Đường dẫn (tương đối) tới module chứa Dockerfile & Terraform')
+
+        booleanParam(name: 'CLEANUP',
+                     defaultValue: true,
+                     description: 'Xoá image local sau khi push')
+
+        booleanParam(name: 'DESTROY',
+                     defaultValue: false,
+                     description: 'Thay apply bằng terraform destroy')
+
+        booleanParam(name: 'DELETE_IMAGE',
+                     defaultValue: false,
+                     description: 'Xoá image trên local/registry')
+
+        string(name: 'DELETE_IMAGE_TAG',
+               defaultValue: '',
+               description: 'Tag image cần xoá (trống = tag hiện tại)')
+    }
+
+    environment {
+        REGISTRY      = "192.168.5.10"
+        IMAGE_NAME    = "${REGISTRY}/devops/node-resources"
+        IMAGE_TAG     = "${env.GIT_COMMIT.take(7)}"
+        DOCKER_CREDS  = credentials('registry-creds')
+        DOCKER_BUILDKIT = '1'
+    }
+
+    stages {
+
+        stage('Checkout') {
+            steps { checkout scm }
+        }
+
+        stage('Setup Delete Image Tag') {
+            when { expression { params.DELETE_IMAGE } }
+            steps {
+                script {
+                    env.IMAGE_TAG_TO_DELETE = params.DELETE_IMAGE_TAG?.trim() ?
+                                              params.DELETE_IMAGE_TAG.trim() :
+                                              env.IMAGE_TAG
+                    echo "Image tag cần xoá: ${env.IMAGE_TAG_TO_DELETE}"
+                }
+            }
+        }
+
+        stage('Delete Docker Image') {
+            when { expression { params.DELETE_IMAGE } }
+            steps {
+                script {
+                    echo "‣ Xoá image ${IMAGE_NAME}:${env.IMAGE_TAG_TO_DELETE}"
+
+                    // Local
+                    sh "docker rmi ${IMAGE_NAME}:${env.IMAGE_TAG_TO_DELETE} || true"
+
+                    // Harbor
+                    sh """
+                        echo ${DOCKER_CREDS_PSW} | docker login ${REGISTRY} -u ${DOCKER_CREDS_USR} --password-stdin
+                        DIGEST=\$(curl -s -I -u "${DOCKER_CREDS_USR}:${DOCKER_CREDS_PSW}" \
+                                 -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \
+                                 https://${REGISTRY}/v2/devops/node-hash/manifests/${env.IMAGE_TAG_TO_DELETE} \
+                                 | grep Docker-Content-Digest | awk '{print \$2}' | tr -d '\\r')
+                        if [ -n "\$DIGEST" ]; then
+                          curl -s -X DELETE -u "${DOCKER_CREDS_USR}:${DOCKER_CREDS_PSW}" \
+                               https://${REGISTRY}/v2/devops/node-hash/manifests/\$DIGEST
+                          echo "Đã xoá trên registry digest \$DIGEST"
+                        else
+                          echo "Không tìm thấy digest trên registry"
+                        fi
+                    """
+                }
+            }
+        }
+
+        stage('Build Docker Image') {
+            when {
+                allOf {
+                    expression { !params.DESTROY }
+                    expression { !params.DELETE_IMAGE }
+                }
+            }
+            steps {
+                dir("${params.MODULE_DIR}") {
+                    script {
+                        def exists = sh(
+                            script: "docker image inspect ${IMAGE_NAME}:${IMAGE_TAG} >/dev/null 2>&1",
+                            returnStatus: true) == 0
+
+                        if (exists) {
+                            echo "Image đã tồn tại local → bỏ qua build"
+                        } else {
+                            sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Push Image') {
+            when {
+                allOf {
+                    expression { !params.DESTROY }
+                    expression { !params.DELETE_IMAGE }
+                }
+            }
+            steps {
+                script {
+                    sh "echo ${DOCKER_CREDS_PSW} | docker login ${REGISTRY} -u ${DOCKER_CREDS_USR} --password-stdin"
+
+                    def existsRemote = sh(returnStatus: true,
+                        script: "docker manifest inspect ${IMAGE_NAME}:${IMAGE_TAG} >/dev/null") == 0
+
+                    if (existsRemote) {
+                        echo "Image đã có trên registry, bỏ qua push"
+                    } else {
+                        sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+                    }
+                }
+            }
+        }
+
+        stage('Cleanup local image') {
+            when {
+                allOf {
+                    expression { params.CLEANUP }
+                    expression { !params.DESTROY }
+                }
+            }
+            steps {
+                sh "docker image rm ${IMAGE_NAME}:${IMAGE_TAG} || true"
+            }
+        }
+
+        stage('Terraform Deploy') {
+            when {
+                allOf {
+                    expression { !params.DESTROY }
+                    expression { !params.DELETE_IMAGE }
+                }
+            }
+            steps {
+                dir("${params.MODULE_DIR}/terraform") {
+                    withCredentials([file(credentialsId: 'kubeconfig-prod', variable: 'KCFG')]) {
+                        withEnv(["KUBECONFIG=${KCFG}"]) {
+                            sh """
+                                terraform init -input=false
+                                terraform apply -auto-approve \
+                                    -var='kubeconfig_path=${KUBECONFIG}' \
+                                    -var='image_repository=${IMAGE_NAME}' \
+                                    -var='image_tag=${IMAGE_TAG}'
+                                echo "Domain     : \$(terraform output -raw domain)"
+                                echo "Cluster IP : \$(terraform output -raw cluster_ip)"
+                                echo "Image      : \$(terraform output -raw image_deployed)"
+                            """
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Terraform Destroy') {
+            when {
+                allOf {
+                    expression { params.DESTROY }
+                    expression { !params.DELETE_IMAGE }
+                }
+            }
+            steps {
+                dir("${params.MODULE_DIR}/terraform") {
+                    withCredentials([file(credentialsId: 'kubeconfig-prod', variable: 'KCFG')]) {
+                        withEnv(["KUBECONFIG=${KCFG}"]) {
+                            sh """
+                                terraform init -input=false
+                                terraform destroy -auto-approve \
+                                    -var='kubeconfig_path=${KUBECONFIG}' \
+                                    -var='image_repository=${IMAGE_NAME}' \
+                                    -var='image_tag=${IMAGE_TAG}'
+                            """
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker system prune -af --filter "until=12h"'
+        }
+        success { echo "✅  Pipeline OK" }
+        failure { echo "❌  Pipeline lỗi – xem Console Output" }
+    }
+}
