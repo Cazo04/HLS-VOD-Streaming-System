@@ -1,0 +1,23 @@
+FROM node:20-alpine
+RUN apk add --no-cache python3 g++ make
+
+# Create app directory
+WORKDIR /usr/src/app
+
+# Copy package files first (for better layer caching)
+COPY package*.json ./
+
+# Install dependencies with production flag
+RUN npm ci --only=production
+
+# Copy application code
+COPY . .
+
+# Rebuild native modules for current environment
+RUN npm rebuild
+
+# Expose the application port
+EXPOSE 3000
+
+# Command to run the application
+CMD ["node", "index.js"]
