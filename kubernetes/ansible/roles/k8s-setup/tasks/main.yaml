@@ -1,0 +1,211 @@
+---
+- name: Update & upgrade
+  apt:
+    update_cache: yes
+    upgrade: dist
+  become: yes
+
+- name: Load kernel modules
+  become: yes
+  copy:
+    dest: /etc/modules-load.d/containerd.conf
+    content: |
+      overlay
+      br_netfilter
+
+- name: modprobe overlay, br_netfilter
+  become: yes
+  shell: |
+    modprobe overlay
+    modprobe br_netfilter
+
+- name: Sysctl config for k8s-cri
+  become: yes
+  copy:
+    dest: /etc/sysctl.d/99-kubernetes-cri.conf
+    content: |
+      net.bridge.bridge-nf-call-iptables=1
+      net.bridge.bridge-nf-call-ip6tables=1
+      net.ipv4.ip_forward=1
+
+- name: Apply sysctl
+  become: yes
+  command: sysctl --system
+
+- name: Install prerequisites for containerd & apt-key
+  become: yes
+  apt:
+    name:
+      - ca-certificates
+      - gnupg
+    state: present
+    update_cache: yes
+
+- name: Add Docker apt repo (for containerd)
+  become: yes
+  shell: |
+    mkdir -p /etc/apt/keyrings
+    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+    $(. /etc/os-release && echo \"${VERSION_CODENAME}\") stable" > /etc/apt/sources.list.d/docker.list
+
+- name: Install containerd.io
+  become: yes
+  apt:
+    name: containerd.io
+    state: present
+    update_cache: yes
+
+- name: Generate default config for containerd
+  become: yes
+  shell: |
+    containerd config default > /tmp/config.toml
+  args:
+    creates: /tmp/config.toml  # Only create once
+
+- name: Copy containerd config with systemd cgroup = true
+  become: yes
+  template:
+    src: containerd.config.toml.j2
+    dest: /etc/containerd/config.toml
+
+- name: Disable swap
+  become: yes
+  shell: |
+    sed -i '/ swap / s/^(.*)$/#\\1/g' /etc/fstab
+    swapoff -a
+
+- name: Restart containerd
+  become: yes
+  service:
+    name: containerd
+    state: restarted
+    enabled: yes
+
+- name: Add Kubernetes apt repo
+  become: yes
+  shell: |
+    mkdir -p /etc/apt/keyrings
+    curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.32/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+    echo "deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.32/deb/ /" > /etc/apt/sources.list.d/kubernetes.list
+
+- name: Install Kubernetes binaries
+  become: yes
+  apt:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: present
+    update_cache: yes
+
+- name: Mark hold
+  become: yes
+  shell: |
+    apt-mark hold kubelet kubeadm kubectl
+
+- name: Kubeadm init (master node)
+  become: yes
+  command: kubeadm init --pod-network-cidr=10.0.0.0/16
+  when: inventory_hostname in groups['masters']
+
+- name: Copy admin.conf for kubectl to use
+  become: yes
+  shell: |
+    mkdir -p /home/{{ ansible_user }}/.kube
+    cp -i /etc/kubernetes/admin.conf /home/{{ ansible_user }}/.kube/config
+    chown {{ ansible_user }}:{{ ansible_user }} /home/{{ ansible_user }}/.kube/config
+  when: inventory_hostname in groups['masters']
+
+- name: View node status (debug)
+  become: yes
+  command: kubectl get nodes
+  register: k8s_nodes
+  ignore_errors: true
+  when: inventory_hostname in groups['masters']
+
+- debug:
+    var: k8s_nodes.stdout
+  when: inventory_hostname in groups['masters']
+
+- name: Get join command (debug display)
+  become: yes
+  command: kubeadm token create --print-join-command
+  register: join_cmd
+  when: inventory_hostname in groups['masters']
+  changed_when: false
+
+- debug:
+    msg: "Worker join command: {{ join_cmd.stdout }}"
+  when: inventory_hostname in groups['masters']
+
+- name: Create directory for registry certificates
+  become: yes
+  file:
+    path: "/etc/containerd/certs.d/{{ registry_ip }}"
+    state: directory
+    mode: '0755'
+
+- name: Copy insecure registry config (hosts.toml)
+  become: yes
+  template:
+    src: hosts.toml.j2
+    dest: "/etc/containerd/certs.d/{{ registry_ip }}/hosts.toml"
+
+- name: Restart containerd for new registry config
+  become: yes
+  service:
+    name: containerd
+    state: restarted
+
+- name: Install helm
+  become: yes
+  shell: |
+    curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3
+    chmod 700 get_helm.sh
+    ./get_helm.sh
+  args:
+    creates: /usr/local/bin/helm
+  when: inventory_hostname in groups['masters']
+
+- name: Helm repo add cilium
+  become: yes
+  command: helm repo add cilium https://helm.cilium.io
+  when: inventory_hostname in groups['masters']
+
+- name: Helm repo update
+  become: yes
+  command: helm repo update
+  when: inventory_hostname in groups['masters']
+
+- name: Install cilium
+  become: yes
+  shell: |
+    helm install cilium cilium/cilium --version 1.16.6 \
+      --namespace kube-system \
+      --set ipam.operator.clusterPoolIPv4PodCIDRList={10.0.0.0/16} \
+      --set hubble.relay.enabled=true \
+      --set hubble.ui.enabled=true \
+      --set prometheus.enabled=true \
+      --set operator.prometheus.enabled=true \
+      --set hubble.enabled=true \
+      --set hubble.metrics.enabled="{dns,drop,tcp,flow,port-distribution,icmp,http}" \
+      --set hubble.metrics.serverTLS=true \
+      --set hubble.ui.contexts="{source_ip,source_namespace,source_workload,destination_ip,destination_namespace,destination_workload,traffic_direction}"
+  when: inventory_hostname in groups['masters']
+
+- name: Install cilium CLI
+  become: yes
+  shell: |
+    CILIUM_CLI_VERSION=$(curl -s https://raw.githubusercontent.com/cilium/cilium-cli/main/stable.txt)
+    CLI_ARCH=amd64
+    if [ "$(uname -m)" = "aarch64" ]; then CLI_ARCH=arm64; fi
+    curl -L --fail --remote-name-all https://github.com/cilium/cilium-cli/releases/download/${CILIUM_CLI_VERSION}/cilium-linux-${CLI_ARCH}.tar.gz{,.sha256sum}
+    sha256sum --check cilium-linux-${CLI_ARCH}.tar.gz.sha256sum
+    tar xzvfC cilium-linux-${CLI_ARCH}.tar.gz /usr/local/bin
+    rm cilium-linux-${CLI_ARCH}.tar.gz{,.sha256sum}
+  args:
+    creates: /usr/local/bin/cilium
+  when: inventory_hostname in groups['masters']
+
+...

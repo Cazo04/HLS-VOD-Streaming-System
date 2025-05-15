@@ -1,0 +1,6 @@
+ansible_user: ubuntu
+ansible_ssh_pass: "{{ vault_ssh_pass }}"
+ansible_become: yes
+ansible_become_method: sudo
+
+registry_ip: "192.168.5.10"
