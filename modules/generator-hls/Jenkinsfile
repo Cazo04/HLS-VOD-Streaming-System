@@ -1,0 +1,256 @@
+pipeline {
+    agent any
+
+    tools { 
+      nodejs 'node22'
+      terraform 'terraform50319'
+    }
+
+    parameters {
+        string(name: 'MODULE_DIR', defaultValue: 'modules/generator-hls',
+            description: 'Relative path to module for build & test')
+        booleanParam(name: 'CLEANUP', defaultValue: true, description: 'Delete local image after push')
+        booleanParam(name: 'DESTROY', defaultValue: false, description: 'Check to run destroy')
+        booleanParam(name: 'DELETE_IMAGE', defaultValue: false, description: 'Check to delete Docker image')
+        string(name: 'DELETE_IMAGE_TAG', defaultValue: '', description: 'Tag of image to delete (leave empty to use current IMAGE_TAG)')
+    }
+
+    environment {
+        REGISTRY = "192.168.5.10"
+        IMAGE_NAME = "${REGISTRY}/devops/generator-hls"
+        IMAGE_TAG = "${env.GIT_COMMIT.take(7)}"
+        DOCKER_CREDS = credentials('registry-creds')
+        DOCKER_BUILDKIT = '1'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout scm
+            }
+        }
+        
+        stage('Setup Delete Image Tag') {
+            when {
+                expression { return params.DELETE_IMAGE }
+            }
+            steps {
+                script {
+                    if (params.DELETE_IMAGE_TAG?.trim()) {
+                        env.IMAGE_TAG_TO_DELETE = params.DELETE_IMAGE_TAG.trim()
+                        echo "Will delete image with tag: ${env.IMAGE_TAG_TO_DELETE}"
+                    } else {
+                        env.IMAGE_TAG_TO_DELETE = env.IMAGE_TAG
+                        echo "No specific tag provided, will delete current image tag: ${env.IMAGE_TAG_TO_DELETE}"
+                    }
+                }
+            }
+        }
+
+        stage('Delete Docker Image') {
+            when {
+                expression { return params.DELETE_IMAGE }
+            }
+            steps {
+                script {
+                    echo "Deleting Docker image ${IMAGE_NAME}:${env.IMAGE_TAG_TO_DELETE}"
+                    
+                    // Delete from local Docker
+                    sh(script: "docker rmi ${IMAGE_NAME}:${env.IMAGE_TAG_TO_DELETE} || echo 'Image not found locally'", returnStatus: true)
+                    
+                    // Delete from Harbor registry
+                    sh """
+                        echo ${DOCKER_CREDS_PSW} | docker login ${REGISTRY} -u ${DOCKER_CREDS_USR} --password-stdin
+                        
+                        # Delete from registry using API
+                        curl -s -X DELETE \\
+                            -u "${DOCKER_CREDS_USR}:${DOCKER_CREDS_PSW}" \\
+                            https://${REGISTRY}/v2/devops/generator-hls/manifests/\\
+                            \$(curl -s -I \\
+                                -u "${DOCKER_CREDS_USR}:${DOCKER_CREDS_PSW}" \\
+                                -H "Accept: application/vnd.docker.distribution.manifest.v2+json" \\
+                                https://${REGISTRY}/v2/devops/generator-hls/manifests/${env.IMAGE_TAG_TO_DELETE} \\
+                                | grep Docker-Content-Digest \\
+                                | awk '{print \$2}' \\
+                                | tr -d '\r') || echo "Failed to delete from registry"
+                    """
+                    
+                    echo "Docker image deleted successfully (if it existed)"
+                }
+            }
+        }
+
+        stage('Install & Test') {
+            when {
+                allOf {
+                    expression { return params.DESTROY == false }
+                    expression { return params.DELETE_IMAGE == false }
+                }
+            }
+            steps {
+                dir("${params.MODULE_DIR}") {
+                    sh '''
+                        npm ci
+                        npm test
+                    '''
+                }
+            }
+        }
+
+        stage('Build Docker image') {
+            when {
+                allOf {
+                    expression { return params.DESTROY == false }
+                    expression { return params.DELETE_IMAGE == false }
+                }
+            }
+            steps {
+                dir("${params.MODULE_DIR}") {
+                    script {
+                        def imageExists = sh(
+                            script: "docker image inspect ${IMAGE_NAME}:${IMAGE_TAG} >/dev/null 2>&1",
+                            returnStatus: true
+                        ) == 0
+                        
+                        if (imageExists) {
+                            echo "Image ${IMAGE_NAME}:${IMAGE_TAG} already exists locally, skipping build"
+                        } else {
+                            echo "Building image ${IMAGE_NAME}:${IMAGE_TAG}"
+                            sh "docker build -t ${IMAGE_NAME}:${IMAGE_TAG} ."
+                        }
+                    }
+                }
+            }
+        }
+
+        stage('Test inside Docker') {
+            when {
+                allOf {
+                    expression { return params.DESTROY == false }
+                    expression { return params.DELETE_IMAGE == false }
+                }
+            }
+            steps {
+                sh """
+                    docker run --rm \\
+                    -e NODE_ENV=test \\
+                    ${IMAGE_NAME}:${IMAGE_TAG} \\
+                    npm test
+                """
+            }
+        }
+
+        stage('Push if not exists') {
+            when {
+                allOf {
+                    expression { return params.DESTROY == false }
+                    expression { return params.DELETE_IMAGE == false }
+                }
+            }
+            steps {
+                script {
+                    // First login to registry
+                    sh "echo ${DOCKER_CREDS_PSW} | docker login ${REGISTRY} -u ${DOCKER_CREDS_USR} --password-stdin"
+                    
+                    // Check if the image already exists in the registry
+                    def imageExists = sh(
+                        returnStatus: true,
+                        script: "docker manifest inspect ${IMAGE_NAME}:${IMAGE_TAG} > /dev/null"
+                    ) == 0
+                    
+                    if (imageExists) {
+                        echo "Image already exists in registry, skipping push."
+                    } else {
+                        echo "Pushing image ${IMAGE_NAME}:${IMAGE_TAG} to registry"
+                        sh "docker push ${IMAGE_NAME}:${IMAGE_TAG}"
+                    }
+                }
+            }
+        }       
+
+        stage('Cleanup local image') {
+            when { 
+                expression { params.CLEANUP == true } 
+                expression { return params.DESTROY == false }
+            } 
+            steps {
+                sh """
+                    docker image rm ${IMAGE_NAME}:${IMAGE_TAG} || true
+                """
+            }
+        }
+
+        stage('Terraform Deploy to K8s') {
+            when {
+                expression { return params.DESTROY == false }
+                expression { return params.DELETE_IMAGE == false }
+            }
+            steps {
+                dir("${params.MODULE_DIR}/terraform") {
+                    withCredentials([file(credentialsId: 'kubeconfig-prod',
+                        variable: 'KCFG')]) {
+                        withEnv(["KUBECONFIG=${KCFG}"]) {
+                            sh '''
+                                echo "Terraform init"
+                                terraform init -input=false
+
+                                echo "Terraform apply"
+                                terraform apply -auto-approve \\
+                                    -var="kubeconfig_path=${KUBECONFIG}" \\
+                                    -var="image_tag=${IMAGE_TAG}" \\
+                                    -var="image_repository=${IMAGE_NAME}"
+
+                                echo "Outputs:"
+                                terraform output
+
+                                echo "Domain     : $(terraform output -raw domain)"
+                                echo "Cluster IP : $(terraform output -raw cluster_ip)"
+                                echo "Image      : $(terraform output -raw image_deployed)"
+                            '''
+                        }
+                    }
+                }
+            }
+        }       
+
+        stage('Terraform Destroy') {
+            when {
+                expression { return params.DESTROY == true }
+                expression { return params.DELETE_IMAGE == false }
+            }
+            steps {
+                dir("${params.MODULE_DIR}/terraform") {
+                    withCredentials([file(credentialsId: 'kubeconfig-prod',
+                        variable: 'KCFG')]) {
+                        withEnv(["KUBECONFIG=${KCFG}"]) {
+                            sh '''
+                                echo "Terraform init"
+                                terraform init -input=false
+                                
+                                echo "Terraform destroy"
+                                terraform destroy -auto-approve \\
+                                    -var="kubeconfig_path=${KUBECONFIG}" \\
+                                    -var="image_tag=${IMAGE_TAG}" \\
+                                    -var="image_repository=${IMAGE_NAME}"
+                            '''
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        always {
+            sh 'docker system prune -af --filter "until=12h"'
+            archiveArtifacts artifacts: 'modules/generator-hls/test-results/**/*', allowEmptyArchive: true
+            junit '**/modules/generator-hls/test-results/**/*.xml'
+        }
+        success {
+            echo "✅ Pipeline finished OK"
+        }
+        failure {
+            echo "❌ Error - check Console Output!"
+        }
+    }
+}
