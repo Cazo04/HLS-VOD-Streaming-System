@@ -603,7 +603,7 @@ const processingIds = new Set();
 // Store ffmpeg commands for each ID to be able to cancel them
 const ffmpegCommands = {};
 
-app.get('/hls/:id', async (req, res) => {
+app.get('/api/hls/:id', async (req, res) => {
     const id = req.params.id;
 
     // Get query parameters with defaults
@@ -698,7 +698,7 @@ app.get('/hls/:id', async (req, res) => {
 });
 
 // New endpoint to cancel processing for an ID
-app.delete('/hls/:id', (req, res) => {
+app.delete('/api/hls/:id', (req, res) => {
     const id = req.params.id;
 
     if (!id) {
