@@ -310,12 +310,12 @@ app.get('/api/resources/:id_data', async (req, res) => {
                         return res.status(404).json({ error: 'Track information not found' });
                     }
 
-                    const nodes = await findNodesHoldFragment(id);
-                    if (nodes.length > 0) {
-                        console.log(`Fragment ID: ${id}`);
-                        console.log('Nodes:', JSON.stringify(nodes, null, 2));
-                        return res.status(200).json(nodes);
-                    }
+                    // const nodes = await findNodesHoldFragment(id);
+                    // if (nodes.length > 0) {
+                    //     console.log(`Fragment ID: ${id}`);
+                    //     console.log('Nodes:', JSON.stringify(nodes, null, 2));
+                    //     return res.status(200).json(nodes);
+                    // }
 
                     const track = {
                         id: fragment.track_id,
