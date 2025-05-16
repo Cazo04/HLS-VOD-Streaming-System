@@ -168,7 +168,7 @@ function handleUpload(uploadId, uploadFolder, req, res, isUpdate = false) {
   req.pipe(bb);
 }
 
-app.post('/upload', (req, res) => {
+app.post('/api/upload', (req, res) => {
 
   let uploadId = uuidv7();
 
@@ -189,7 +189,7 @@ app.post('/upload', (req, res) => {
 
 });
 
-app.post('/upload/:uploadId', (req, res) => {
+app.post('/api/upload/:uploadId', (req, res) => {
   const { uploadId } = req.params;
   const uploadFolder = path.join(uploadsDir, uploadId);
   const completedPath = path.join(completedDir, uploadId);
