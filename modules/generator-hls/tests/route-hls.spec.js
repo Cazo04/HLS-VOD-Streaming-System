@@ -4,7 +4,7 @@ const { app } = require('../src/app');
 const path = require('path');
 const fs = require('fs');
 
-describe('GET /hls/:id', () => {
+describe('GET /api/hls/:id', () => {
     beforeEach(() => {
         mock({
             'completed/abc': {
@@ -35,17 +35,17 @@ describe('GET /hls/:id', () => {
 
     // Test cases remain the same
     it('thiếu id → 400', async () => {
-        const res = await request(app).get('/hls/');
+        const res = await request(app).get('/api/hls/');
         expect(res.status).toBe(404);   // route mismatch
     });
 
     it('id không tồn tại → 404', async () => {
-        const res = await request(app).get('/hls/xyz');
+        const res = await request(app).get('/api/hls/xyz');
         expect(res.status).toBe(404);
     });
 
     it('nhận request hợp lệ → 202', async () => {
-        const res = await request(app).get('/hls/abc?video=false&audio=false&subtitle=false&thumbnails=false');
+        const res = await request(app).get('/api/hls/abc?video=false&audio=false&subtitle=false&thumbnails=false');
         expect(res.status).toBe(202);
     });
 });
