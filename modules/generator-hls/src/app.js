@@ -32,6 +32,7 @@ const languageMap = {
     dut: ["nl", "Dutch"],
     swe: ["sv", "Swedish"],
     nor: ["no", "Norwegian"],
+    nob: ["no", "Norwegian Bokmål"],
     dan: ["da", "Danish"],
     fin: ["fi", "Finnish"],
     pol: ["pl", "Polish"],
@@ -41,8 +42,10 @@ const languageMap = {
     hun: ["hu", "Hungarian"],
     heb: ["he", "Hebrew"],
     ces: ["cs", "Czech"],
+    cze: ["cs", "Czech"],
     bul: ["bg", "Bulgarian"],
     ron: ["ro", "Romanian"],
+    rum: ["ro", "Romanian"],
     srp: ["sr", "Serbian"],
     hrv: ["hr", "Croatian"],
     slk: ["sk", "Slovak"],
@@ -53,6 +56,7 @@ const languageMap = {
     ind: ["id", "Indonesian"],
     mal: ["ms", "Malay"],
     msa: ["ms", "Malay"],
+    may: ["ms", "Malay"],
     tam: ["ta", "Tamil"],
     urd: ["ur", "Urdu"],
     per: ["fa", "Persian"],
@@ -65,7 +69,6 @@ const languageMap = {
     kan: ["kn", "Kannada"],
     tel: ["te", "Telugu"],
     mlm: ["ml", "Malayalam"],
-    mal: ["ml", "Malayalam"],
     amh: ["am", "Amharic"],
     swa: ["sw", "Swahili"],
     geo: ["ka", "Georgian"],
@@ -82,9 +85,6 @@ const languageMap = {
     pus: ["ps", "Pashto"],
     snd: ["sd", "Sindhi"],
     asm: ["as", "Assamese"],
-    cze: ["cs", "Czech"],
-    may: ["ms", "Malay"],
-    nob: ["no", "Norwegian Bokmål"],
 };
 
 function getLanguageInfo(abbr, returnFullName) {
@@ -185,6 +185,12 @@ async function generateSubtitleLocal(filePath, tempDir, id) {
         let language = "und-" + index;
         if (stream.tags && stream.tags.language) {
             language = stream.tags.language;
+            // Add title to the language identifier if it exists
+            if (stream.tags.title) {
+                language += `-${stream.tags.title}`;
+            }
+            // Sanitize the language string to ensure valid file paths
+            language = language.replace(/[<>:"/\\|?*]/g, '_');
         }
         const outputDir = path.join(tempDirSubtitle, language);
         fs.mkdirSync(outputDir, { recursive: true });
@@ -432,11 +438,19 @@ async function generateMasterHlsLocal(tempDir) {
             for (const subtitleName of subDirs) {
                 const subtitlePath = path.join('subtitle', subtitleName, 'output.m3u8');
                 let displayName, langAttr = '';
-                if (subtitleName.includes('-')) {
+                if (subtitleName.startsWith('und-')) {
                     displayName = subtitleName;
                 } else {
-                    displayName = getLanguageInfo(subtitleName, true);
-                    langAttr = `LANGUAGE="${getLanguageInfo(subtitleName, false)}",`;
+                    // Check if subtitleName contains a title part (has a hyphen)
+                    if (subtitleName.includes('-')) {
+                        const [langCode, ...titleParts] = subtitleName.split('-');
+                        const title = titleParts.join('-'); // Rejoin in case title itself has hyphens
+                        displayName = `${getLanguageInfo(langCode, true)} (${title})`;
+                        langAttr = `LANGUAGE="${getLanguageInfo(langCode, false)}",`;
+                    } else {
+                        displayName = getLanguageInfo(subtitleName, true);
+                        langAttr = `LANGUAGE="${getLanguageInfo(subtitleName, false)}",`;
+                    }
                 }
                 masterPlaylist += `#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="subtitle",NAME="${displayName}",${isFirstSubtitle ? "DEFAULT=YES," : ""}${langAttr}AUTOSELECT=YES,URI="${subtitlePath}"\n`;
                 isFirstSubtitle = false;
@@ -606,7 +620,7 @@ const processingIds = new Set();
 // Store ffmpeg commands for each ID to be able to cancel them
 const ffmpegCommands = {};
 
-app.get('/api/hls/:id', async (req, res) => {
+app.get('/hls/:id', async (req, res) => {
     const id = req.params.id;
 
     // Get query parameters with defaults
@@ -624,7 +638,7 @@ app.get('/api/hls/:id', async (req, res) => {
         return res.status(409).json({ error: "This ID is already being processed" });
     }
 
-    const fullFolderPath = path.join(process.env.TEST_BASE_DIR || BASE_DIR, id);
+    const fullFolderPath = path.join(BASE_DIR, id);
 
     if (!fs.existsSync(fullFolderPath)) {
         return res.status(404).json({ error: "Folder not found" });
@@ -650,7 +664,6 @@ app.get('/api/hls/:id', async (req, res) => {
 
     res.status(202).json({ message: "Request received, server will process in the background." });
 
-    if (process.env.TEST_BASE_DIR) return;
     (async () => {
         try {
             const tempDir = path.join(path.dirname(filePath), 'hls');
@@ -684,7 +697,7 @@ app.get('/api/hls/:id', async (req, res) => {
 
             // Update the media status to "PROCESSED"
             await updateMedia(id, 'PROCESSED');
-            
+
             // Call hash service to update the hash
             callHashService(id)
                 .then(() => console.log("Hash service updated"))
@@ -701,7 +714,7 @@ app.get('/api/hls/:id', async (req, res) => {
 });
 
 // New endpoint to cancel processing for an ID
-app.delete('/api/hls/:id', (req, res) => {
+app.delete('/hls/:id', (req, res) => {
     const id = req.params.id;
 
     if (!id) {
@@ -730,4 +743,7 @@ app.delete('/api/hls/:id', (req, res) => {
     return res.status(200).json({ message: "Processing cancelled for ID: " + id });
 });
 
-module.exports = { app, getLanguageInfo, calculateStreamBitrate, callHashService };
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server is listening on port ${PORT}...`);
+});
