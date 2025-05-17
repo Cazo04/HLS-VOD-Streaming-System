@@ -144,7 +144,7 @@ function runFFmpegAsync(filePath, outputPath, outputOptions, id) {
 
         // If outputPath exists, specify output
         if (outputPath) {
-            command.output(outputPath);
+            command.output(outputPath.replace(/ /g, '\\ '));
         }
 
         // Store the command if an ID is provided
