@@ -82,6 +82,7 @@ const languageMap = {
     pus: ["ps", "Pashto"],
     snd: ["sd", "Sindhi"],
     asm: ["as", "Assamese"],
+    cze: ["cs", "Czech"],
 };
 
 function getLanguageInfo(abbr, returnFullName) {
