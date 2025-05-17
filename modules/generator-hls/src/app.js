@@ -84,6 +84,7 @@ const languageMap = {
     asm: ["as", "Assamese"],
     cze: ["cs", "Czech"],
     may: ["ms", "Malay"],
+    nob: ["no", "Norwegian Bokmål"],
 };
 
 function getLanguageInfo(abbr, returnFullName) {
