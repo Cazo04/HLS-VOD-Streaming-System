@@ -144,7 +144,7 @@ function runFFmpegAsync(filePath, outputPath, outputOptions, id) {
 
         // If outputPath exists, specify output
         if (outputPath) {
-            command.output(outputPath.replace(/ /g, '\\ '));
+            command.output(outputPath);
         }
 
         // Store the command if an ID is provided
@@ -192,7 +192,7 @@ async function generateSubtitleLocal(filePath, tempDir, id) {
             // Sanitize the language string to ensure valid file paths
             language = language.replace(/[<>:"/\\|?*]/g, '_');
         }
-        const outputDir = path.join(tempDirSubtitle, language);
+        const outputDir = path.join(tempDirSubtitle, language).replace(' ','_');
         fs.mkdirSync(outputDir, { recursive: true });
 
         // Create webvtt segment
@@ -444,7 +444,7 @@ async function generateMasterHlsLocal(tempDir) {
                     // Check if subtitleName contains a title part (has a hyphen)
                     if (subtitleName.includes('-')) {
                         const [langCode, ...titleParts] = subtitleName.split('-');
-                        const title = titleParts.join('-'); // Rejoin in case title itself has hyphens
+                        const title = titleParts.join('-').replace('_',' '); // Rejoin in case title itself has hyphens
                         displayName = `${getLanguageInfo(langCode, true)} (${title})`;
                         langAttr = `LANGUAGE="${getLanguageInfo(langCode, false)}",`;
                     } else {
