@@ -83,6 +83,7 @@ const languageMap = {
     snd: ["sd", "Sindhi"],
     asm: ["as", "Assamese"],
     cze: ["cs", "Czech"],
+    may: ["ms", "Malay"],
 };
 
 function getLanguageInfo(abbr, returnFullName) {
