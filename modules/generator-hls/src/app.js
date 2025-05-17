@@ -620,7 +620,7 @@ const processingIds = new Set();
 // Store ffmpeg commands for each ID to be able to cancel them
 const ffmpegCommands = {};
 
-app.get('/hls/:id', async (req, res) => {
+app.get('/api/hls/:id', async (req, res) => {
     const id = req.params.id;
 
     // Get query parameters with defaults
@@ -638,7 +638,7 @@ app.get('/hls/:id', async (req, res) => {
         return res.status(409).json({ error: "This ID is already being processed" });
     }
 
-    const fullFolderPath = path.join(BASE_DIR, id);
+    const fullFolderPath = path.join(process.env.TEST_BASE_DIR || BASE_DIR, id);
 
     if (!fs.existsSync(fullFolderPath)) {
         return res.status(404).json({ error: "Folder not found" });
@@ -664,6 +664,7 @@ app.get('/hls/:id', async (req, res) => {
 
     res.status(202).json({ message: "Request received, server will process in the background." });
 
+    if (process.env.TEST_BASE_DIR) return;
     (async () => {
         try {
             const tempDir = path.join(path.dirname(filePath), 'hls');
@@ -714,7 +715,7 @@ app.get('/hls/:id', async (req, res) => {
 });
 
 // New endpoint to cancel processing for an ID
-app.delete('/hls/:id', (req, res) => {
+app.delete('/api/hls/:id', (req, res) => {
     const id = req.params.id;
 
     if (!id) {
@@ -743,7 +744,4 @@ app.delete('/hls/:id', (req, res) => {
     return res.status(200).json({ message: "Processing cancelled for ID: " + id });
 });
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-    console.log(`Server is listening on port ${PORT}...`);
-});
+module.exports = { app, getLanguageInfo, calculateStreamBitrate, callHashService };
