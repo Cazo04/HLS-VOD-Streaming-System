@@ -321,7 +321,7 @@ async function rerender(filePath, tempDir, id) {
         outputMp4,
         [
             '-an',                // remove audio
-            '-c:v libx264',
+            '-c:v libx265',
             '-preset slow'
         ],
         id
